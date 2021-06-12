@@ -38,7 +38,7 @@
                 type="text"
                 name="wallet"
                 id="wallet"
-                class="block w-full pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
+                class="block w-full p-2 pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
                 placeholder="Например DOGE"
               />
             </div>
@@ -79,11 +79,12 @@
           Добавить
         </button>
       </section>
+      <input type="text" class="filter" v-model="filter" />
       <template v-if="tickers.length > 0">
         <hr class="w-full border-t border-gray-600 my-4" />
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
-            v-for="t in tickers"
+            v-for="t in slicedTickers"
             v-bind:key="t.name"
             @click="selectTicker(t)"
             :class="{
@@ -119,6 +120,21 @@
           </div>
         </dl>
         <hr class="w-full border-t border-gray-600 my-4" />
+        <button
+          @click="decreasePage"
+          v-show="hasPrevPage"
+          class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+        >
+          prev
+        </button>
+        page: {{ page }}
+        <button
+          @click="increasePage"
+          v-show="hasNextPage"
+          class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+        >
+          next
+        </button>
       </template>
       <section v-if="selectedTicker" class="relative">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
@@ -168,21 +184,105 @@ import { BASE_URL } from "./constants";
 export default {
   name: "App",
   data() {
+    const defaultTickers = [
+      { name: "BTC", price: 0 },
+      { name: "DOGE", price: 0 },
+      { name: "ETH", price: 0 }
+    ];
     return {
       selectedTicker: null,
       tickerName: "",
-      tickers: [
-        { name: "BTC", price: 0 },
-        { name: "DOGE", price: 0 },
-        { name: "ETH", price: 0 }
-      ],
+      tickers: defaultTickers,
+      filter: "",
       graph: [],
       tickerAlreadyAdded: false,
       possibleTickers: [],
-      allPossibleTickers: []
+      allPossibleTickers: [],
+      page: 1
     };
   },
+  computed: {
+    filteredTickers() {
+      return this.tickers.filter(ticker => {
+        return ticker.name.toLowerCase().includes(this.filter.toLowerCase());
+      });
+    },
+    slicedTickers() {
+      return this.filteredTickers.slice(6 * (this.page - 1), 6 * this.page);
+    },
+    hasNextPage() {
+      return this.tickers.length > 6 * this.page;
+    },
+    hasPrevPage() {
+      return this.page > 1;
+    }
+  },
+  watch: {
+    tickerName() {
+      if (this.tickerName === "") return;
+      this.possibleTickers = this.allPossibleTickers
+        .filter(ticker => {
+          const isIncluded =
+            ticker.Name.toLowerCase().includes(this.tickerName.toLowerCase()) ||
+            ticker.Symbol.toLowerCase().includes(this.tickerName.toLowerCase());
+          return isIncluded ? ticker.Name : false;
+        })
+        .slice(0, 3);
+    },
+    page() {
+      const URL = new window.URL(window.location.href);
+      URL.searchParams.set("page", this.page);
+      window.history.replaceState({}, "cryptonomicon", URL);
+    },
+    filter() {
+      const URL = new window.URL(window.location.href);
+      URL.searchParams.set("filter", this.filter);
+      window.history.replaceState({}, "cryptonomicon", URL);
+    },
+    tickers: {
+      handler() {
+        window.localStorage.setItem("tickers", JSON.stringify(this.tickers));
+      },
+      deep: true
+    }
+  },
+  created() {
+    fetch("https://min-api.cryptocompare.com/data/all/coinlist")
+      .then(res => res.json())
+      .then(res => {
+        this.allPossibleTickers = Object.values(res.Data).sort((a, b) =>
+          a.Name > b.Name ? 1 : -1
+        );
+      });
+  },
+  mounted() {
+    this.interval = setInterval(async () => {
+      if (this.tickers.length > 0) {
+        const data = await this.fetchData();
+        this.tickers.forEach(item => {
+          // eslint-disable-next-line no-param-reassign
+          item.price = data[item.name]?.USD ?? 0;
+        });
+        if (this.selectedTicker) {
+          this.graph.push(this.selectedTicker.price);
+        }
+      }
+    }, 5 * 1000);
+    const URL = new window.URL(window.location.href);
+    this.page = Number(URL.searchParams.get("page")) || 1;
+    this.filter = Number(URL.searchParams.get("filter")) || "";
+    this.tickers = JSON.parse(window.localStorage.getItem("tickers")) ?? [];
+  },
+  unmounted() {
+    clearInterval(this.interval);
+  },
   methods: {
+    increasePage() {
+      this.page += 1;
+    },
+    decreasePage() {
+      this.page -= 1;
+    },
     addTicker(name) {
       const tickerName = name || this.tickerName;
       if (this.tickers.find(ticker => ticker.name === tickerName)) {
@@ -192,7 +292,6 @@ export default {
         this.tickers.push({ name: tickerName, price: 0 });
       }
     },
-
     removeTicker(ticker) {
       this.tickers = this.tickers.filter(item => item !== ticker);
     },
@@ -215,43 +314,7 @@ export default {
         return result;
       }
       return 50;
-    },
-    updatePossibleTickers(e) {
-      this.possibleTickers = this.allPossibleTickers
-        .filter(ticker => {
-          const isIncluded =
-            ticker.Name.toLowerCase().includes(e.target.value.toLowerCase()) ||
-            ticker.Symbol.toLowerCase().includes(e.target.value.toLowerCase());
-          return isIncluded ? ticker.Name : false;
-        })
-        .slice(0, 3);
     }
-  },
-  created() {
-    fetch("https://min-api.cryptocompare.com/data/all/coinlist")
-      .then(res => res.json())
-      .then(res => {
-        this.allPossibleTickers = Object.values(res.Data);
-      });
-  },
-  mounted() {
-    this.interval = setInterval(async () => {
-      if (this.tickers.length > 0) {
-        const data = await this.fetchData();
-        this.tickers.forEach(item => {
-          // eslint-disable-next-line no-param-reassign
-          item.price = data[item.name].USD;
-        });
-        if (this.selectedTicker) {
-          this.graph.push(this.selectedTicker.price);
-        }
-      }
-    }, 5 * 1000);
-  },
-  unmounted() {
-    clearInterval(this.interval);
   }
 };
 </script>
-
-<style src="./app.css"></style>
