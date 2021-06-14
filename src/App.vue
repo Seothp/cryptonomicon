@@ -283,6 +283,8 @@ export default {
     },
     removeTicker(ticker) {
       this.tickers = this.tickers.filter(item => item !== ticker);
+      this.selectedTicker = null;
+      this.graph = [];
     },
     selectTicker(ticker) {
       this.selectedTicker = ticker;
