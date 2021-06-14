@@ -179,20 +179,20 @@
 </template>
 
 <script>
-import { BASE_URL } from "./constants";
+//
+//
+//  TODO:  FIX GRAPH UPDATES
+//
+//
+import { subscribeToTicker, getAllTickers } from "./api";
 
 export default {
   name: "App",
   data() {
-    const defaultTickers = [
-      { name: "BTC", price: 0 },
-      { name: "DOGE", price: 0 },
-      { name: "ETH", price: 0 }
-    ];
     return {
       selectedTicker: null,
       tickerName: "",
-      tickers: defaultTickers,
+      tickers: [],
       filter: "",
       graph: [],
       tickerAlreadyAdded: false,
@@ -246,35 +246,17 @@ export default {
       deep: true
     }
   },
-  created() {
-    fetch("https://min-api.cryptocompare.com/data/all/coinlist")
-      .then(res => res.json())
-      .then(res => {
-        this.allPossibleTickers = Object.values(res.Data).sort((a, b) =>
-          a.Name > b.Name ? 1 : -1
-        );
-      });
-  },
   mounted() {
-    this.interval = setInterval(async () => {
-      if (this.tickers.length > 0) {
-        const data = await this.fetchData();
-        this.tickers.forEach(item => {
-          // eslint-disable-next-line no-param-reassign
-          item.price = data[item.name]?.USD ?? 0;
-        });
-        if (this.selectedTicker) {
-          this.graph.push(this.selectedTicker.price);
-        }
-      }
-    }, 5 * 1000);
     const URL = new window.URL(window.location.href);
     this.page = Number(URL.searchParams.get("page")) || 1;
     this.filter = Number(URL.searchParams.get("filter")) || "";
     this.tickers = JSON.parse(window.localStorage.getItem("tickers")) ?? [];
-  },
-  unmounted() {
-    clearInterval(this.interval);
+    this.tickers.forEach(ticker => {
+      subscribeToTicker(ticker.name, this.getUpdateTickerCallback(ticker.name));
+    });
+    getAllTickers().then(res => {
+      this.allPossibleTickers = res;
+    });
   },
   methods: {
     increasePage() {
@@ -284,12 +266,19 @@ export default {
       this.page -= 1;
     },
     addTicker(name) {
-      const tickerName = name || this.tickerName;
+      const tickerName = name ?? this.tickerName;
       if (this.tickers.find(ticker => ticker.name === tickerName)) {
         this.tickerAlreadyAdded = true;
       } else {
         this.tickerAlreadyAdded = false;
-        this.tickers.push({ name: tickerName, price: 0 });
+        const ticker = {
+          name: tickerName,
+          price: 0,
+          unsubscribe: () => {}
+        };
+        const unsubscribe = subscribeToTicker(tickerName, this.getUpdateTickerCallback(tickerName));
+        ticker.unsubscribe = unsubscribe;
+        this.tickers.push(ticker);
       }
     },
     removeTicker(ticker) {
@@ -298,12 +287,6 @@ export default {
     selectTicker(ticker) {
       this.selectedTicker = ticker;
       this.graph = [];
-    },
-    async fetchData() {
-      const fsyms = this.tickers.map(item => item.name).join(",");
-      const res = await fetch(`${BASE_URL}data/pricemulti?fsyms=${fsyms}&tsyms=USD`);
-      const data = await res.json();
-      return data;
     },
     getBarHeight(price) {
       const min = Math.min(...this.graph);
@@ -314,6 +297,20 @@ export default {
         return result;
       }
       return 50;
+    },
+    getUpdateTickerCallback(name) {
+      return price => {
+        this.graph.push(price);
+        this.tickers = this.tickers.map(t => {
+          if (t.name === name) {
+            return {
+              ...t,
+              price
+            };
+          }
+          return t;
+        });
+      };
     }
   }
 };
